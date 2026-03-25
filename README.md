@@ -1,12 +1,12 @@
 # AI Compiler - A Domain-Specific Language Compiler for Unity Game AI
 
-AI Compiler is a comprehensive tool that helps game developers design and implement complex AI behaviors for Unity games without needing to write low-level C# code. By using a custom domain-specific language (DSL), you can describe state machines, variable logic, and game rules in a straightforward, human-readable way. The AI Compiler then handles the translation into optimized, ready-to-use Unity C# scripts.
+AI Compiler is a tool that lets game developers design AI behaviors using a simple, human-friendly language instead of wrestling with complex Unity C# code. Just describe what your characters should do—like "when see_player -> Chase" or "orbit 3 times and heal"—and the compiler automatically generates clean, ready-to-use Unity scripts. It handles all the heavy lifting: type checking, loops, state machines, and even optimizes your code behind the scenes. Whether you're prototyping quickly or building complex enemy behaviors, this tool lets you focus on making your game AI feel alive instead of getting lost in implementation details.
 
 ---
 
 ## Project Overview
 
-Building smart game AI can be daunting, especially if you’re not deeply familiar with programming in C#. AI Compiler bridges that gap. It gives you a friendly DSL to express your ideas, then turns them into efficient Unity-compatible code behind the scenes. Whether you’re prototyping, teaching, or working on production games, this tool aims to make AI development quick, safe, and enjoyable.
+Building smart game AI can be daunting, especially if you're not deeply familiar with programming in C#. AI Compiler bridges that gap. It gives you a friendly DSL to express your ideas, then turns them into efficient Unity-compatible code behind the scenes. Whether you're prototyping, teaching, or working on production games, this tool aims to make AI development quick, safe, and enjoyable.
 
 ---
 
@@ -238,18 +238,12 @@ public class Goblin : MonoBehaviour {
 - More Unity-specific exports (coroutines, physics, etc.)
 - Graphical user interface for greater usability
 
----
 
-## Contributing
 
-Contributions and suggestions are always welcome. Please open an issue or pull request with your ideas, feedback, or code changes.
 
----
 
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
 
----
 
-If you have questions or need support, feel free to reach out or open an issue on the repository. Happy coding, and enjoy building smarter games with less hassle!
