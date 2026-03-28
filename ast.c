@@ -1,4 +1,6 @@
+#define _GNU_SOURCE
 #include "ast.h"
+#include "symbol_table.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -376,6 +378,95 @@ static void print_indent(FILE* out) {
     }
 }
 
+// Helper to clean up extra parentheses from expressions
+static char* clean_parentheses(const char* expr) {
+    if (!expr) return strdup("");
+    
+    int len = strlen(expr);
+    // Remove outer parentheses if they wrap the whole expression
+    if (len > 2 && expr[0] == '(' && expr[len-1] == ')') {
+        // Check if it's balanced and the outer parentheses are unnecessary
+        int balance = 0;
+        int has_outer = 1;
+        for (int i = 1; i < len-1; i++) {
+            if (expr[i] == '(') balance++;
+            if (expr[i] == ')') balance--;
+            if (balance < 0) {
+                has_outer = 0;
+                break;
+            }
+        }
+        if (has_outer && balance == 0) {
+            char* cleaned = malloc(len - 1);
+            strncpy(cleaned, expr + 1, len - 2);
+            cleaned[len - 2] = '\0';
+            return cleaned;
+        }
+    }
+    return strdup(expr);
+}
+
+// Helper to generate condition string without parentheses
+static char* generate_condition_string(ASTNode* node) {
+    if (!node) return strdup("");
+    
+    char buffer[1024] = {0};
+    FILE* temp_file = tmpfile();
+    if (temp_file) {
+        // Generate condition using the existing function
+        if (node->type == NODE_CONDITION_CMP) {
+            if (node->name && node->value) {
+                fprintf(temp_file, "%s %s", node->name, node->value);
+            }
+        } else if (node->type == NODE_CONDITION) {
+            if (node->name) {
+                fprintf(temp_file, "%s", node->name);
+            }
+        } else {
+            char* expr = expr_to_string(node);
+            fprintf(temp_file, "%s", expr);
+            free(expr);
+        }
+        rewind(temp_file);
+        fgets(buffer, sizeof(buffer), temp_file);
+        fclose(temp_file);
+    }
+    return strdup(buffer);
+}
+
+static void format_csharp_value(const char* value, VarType type, FILE* out) {
+    if (!value) {
+        fprintf(out, "0");
+        return;
+    }
+    
+    // Check if it's a boolean literal
+    if (strcmp(value, "true") == 0) {
+        fprintf(out, "true");
+        return;
+    }
+    if (strcmp(value, "false") == 0) {
+        fprintf(out, "false");
+        return;
+    }
+    
+    // Check for numeric boolean (0 or 1) that should be converted to bool
+    if ((strcmp(value, "0") == 0 || strcmp(value, "1") == 0) && type == VAR_TYPE_BOOL) {
+        fprintf(out, "%s", strcmp(value, "1") == 0 ? "true" : "false");
+        return;
+    }
+    
+    // Check if it's a float literal (contains decimal)
+    if (strchr(value, '.') != NULL && type != VAR_TYPE_INT) {
+        // Add 'f' suffix for float literals in C#
+        fprintf(out, "%sf", value);
+        return;
+    }
+    
+    // Default output
+    fprintf(out, "%s", value);
+}
+
 static void generate_condition(ASTNode* node, FILE* out) {
     if (!node) return;
     
@@ -408,7 +499,21 @@ static void generate_condition(ASTNode* node, FILE* out) {
             
         case NODE_EXPR_VAL:
             if (node->value) {
-                fprintf(out, "%s", node->value);
+                // Check if value is numeric and should have f suffix
+                int is_numeric = 1;
+                int has_decimal = 0;
+                for (const char* p = node->value; *p; p++) {
+                    if (*p == '.') has_decimal = 1;
+                    if (!isdigit(*p) && *p != '.') {
+                        is_numeric = 0;
+                        break;
+                    }
+                }
+                if (is_numeric && has_decimal) {
+                    fprintf(out, "%sf", node->value);
+                } else {
+                    fprintf(out, "%s", node->value);
+                }
             }
             break;
             
@@ -436,7 +541,36 @@ void generate_csharp(ASTNode* node, FILE* out) {
             fprintf(out, "public class %s : MonoBehaviour {\n", node->name ? node->name : "Entity");
             indent_level++;
             
-            // Generate declarations
+            // Generate variable declarations from symbol table
+            print_indent(out);
+            fprintf(out, "// Variable declarations\n");
+            for (int i = 0; i < symbol_count; i++) {
+                const char* csharp_type = "float";
+                if (symbol_table[i].vtype == VAR_TYPE_BOOL) {
+                    csharp_type = "bool";
+                } else if (symbol_table[i].vtype == VAR_TYPE_INT) {
+                    csharp_type = "int";
+                }
+                print_indent(out);
+                fprintf(out, "public %s %s = ", csharp_type, symbol_table[i].name);
+                
+                if (symbol_table[i].vtype == VAR_TYPE_BOOL) {
+                    fprintf(out, "%s", symbol_table[i].bool_value ? "true" : "false");
+                } else if (symbol_table[i].vtype == VAR_TYPE_INT) {
+                    fprintf(out, "%.0f", symbol_table[i].value);
+                } else {
+                    // Float - check if whole number to decide formatting
+                    if (symbol_table[i].value == (int)symbol_table[i].value) {
+                        fprintf(out, "%.0ff", symbol_table[i].value);
+                    } else {
+                        fprintf(out, "%ff", symbol_table[i].value);
+                    }
+                }
+                fprintf(out, ";\n");
+            }
+            fprintf(out, "\n");
+            
+            // Also generate declarations from AST (for any that might not be in symbol table)
             ASTNode* child = node->children;
             while (child) {
                 if (child->type == NODE_DECL) {
@@ -445,7 +579,6 @@ void generate_csharp(ASTNode* node, FILE* out) {
                 child = child->next;
             }
             
-            fprintf(out, "\n");
             print_indent(out);
             fprintf(out, "private string currentState = \"Idle\";\n\n");
             
@@ -524,18 +657,30 @@ void generate_csharp(ASTNode* node, FILE* out) {
             
         case NODE_DECL:
             print_indent(out);
-            fprintf(out, "public float %s = %s;\n", 
-                    node->name ? node->name : "var", 
-                    node->value ? node->value : "0");
+            // Check if variable is already declared from symbol table
+            int idx = find_symbol(node->name);
+            if (idx != -1) {
+                // Already declared in symbol table, skip to avoid duplication
+                break;
+            }
+            fprintf(out, "public float %s = ", node->name ? node->name : "var");
+            format_csharp_value(node->value, VAR_TYPE_FLOAT, out);
+            fprintf(out, ";\n");
             break;
             
         case NODE_WHEN:
             print_indent(out);
             fprintf(out, "if (");
             if (node->name) {
-                fprintf(out, "%s", node->name);
-            } else {
-                generate_condition(node->children, out);
+                char* cleaned = clean_parentheses(node->name);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+            } else if (node->children) {
+                char* cond_str = generate_condition_string(node->children);
+                char* cleaned = clean_parentheses(cond_str);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+                free(cond_str);
             }
             fprintf(out, ") ChangeState(\"%s\");\n", node->value ? node->value : "");
             break;
@@ -544,9 +689,15 @@ void generate_csharp(ASTNode* node, FILE* out) {
             print_indent(out);
             fprintf(out, "if (!(");
             if (node->name) {
-                fprintf(out, "%s", node->name);
-            } else {
-                generate_condition(node->children, out);
+                char* cleaned = clean_parentheses(node->name);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+            } else if (node->children) {
+                char* cond_str = generate_condition_string(node->children);
+                char* cleaned = clean_parentheses(cond_str);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+                free(cond_str);
             }
             fprintf(out, ")) ChangeState(\"%s\");\n", node->value ? node->value : "");
             break;
@@ -555,9 +706,15 @@ void generate_csharp(ASTNode* node, FILE* out) {
             print_indent(out);
             fprintf(out, "if (!(");
             if (node->name) {
-                fprintf(out, "%s", node->name);
-            } else {
-                generate_condition(node->children, out);
+                char* cleaned = clean_parentheses(node->name);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+            } else if (node->children) {
+                char* cond_str = generate_condition_string(node->children);
+                char* cleaned = clean_parentheses(cond_str);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+                free(cond_str);
             }
             fprintf(out, ")) ChangeState(\"%s\");\n", node->value ? node->value : "");
             break;
@@ -566,9 +723,15 @@ void generate_csharp(ASTNode* node, FILE* out) {
             print_indent(out);
             fprintf(out, "if (");
             if (node->name) {
-                fprintf(out, "%s", node->name);
-            } else {
-                generate_condition(node->children, out);
+                char* cleaned = clean_parentheses(node->name);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+            } else if (node->children) {
+                char* cond_str = generate_condition_string(node->children);
+                char* cleaned = clean_parentheses(cond_str);
+                fprintf(out, "%s", cleaned);
+                free(cleaned);
+                free(cond_str);
             }
             fprintf(out, ") {\n");
             indent_level++;
@@ -593,7 +756,13 @@ void generate_csharp(ASTNode* node, FILE* out) {
             
         case NODE_PRINT:
             print_indent(out);
-            fprintf(out, "Debug.Log(%s);\n", node->name);
+            if (node->name) {
+                char* cleaned = clean_parentheses(node->name);
+                fprintf(out, "Debug.Log(%s);\n", cleaned);
+                free(cleaned);
+            } else {
+                fprintf(out, "Debug.Log(\"\");\n");
+            }
             break;
             
         case NODE_LOOP:
@@ -608,9 +777,13 @@ void generate_csharp(ASTNode* node, FILE* out) {
             
         case NODE_ASSIGN:
             print_indent(out);
-            fprintf(out, "%s = %s;\n", 
-                    node->name ? node->name : "var", 
-                    node->value ? node->value : "0");
+            if (node->value) {
+                char* cleaned = clean_parentheses(node->value);
+                fprintf(out, "%s = %s;\n", node->name ? node->name : "var", cleaned);
+                free(cleaned);
+            } else {
+                fprintf(out, "%s = 0;\n", node->name ? node->name : "var");
+            }
             break;
             
         default:

@@ -34,3 +34,5 @@ run: compiler
 
 
 #    ./compiler_terminal.sh
+
+#            sed -i 's/\r$//' compiler_terminal.sh      bash compiler_terminal.sh
