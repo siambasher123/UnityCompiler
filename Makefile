@@ -33,6 +33,6 @@ run: compiler
 #   cd /mnt/f/compiler_lab/compiler3
 
 
-#    ./compiler_terminal.sh
+#       ./compiler_terminal.sh
 
 #            sed -i 's/\r$//' compiler_terminal.sh      bash compiler_terminal.sh
